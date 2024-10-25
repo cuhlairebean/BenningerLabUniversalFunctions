@@ -1,2 +1,2 @@
-# BenningerLabUniversalFunctions
-Universal Code Condensed
+# UniCode
+ Universal code for MatLab
