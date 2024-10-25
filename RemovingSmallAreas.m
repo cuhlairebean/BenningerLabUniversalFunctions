@@ -1,16 +1,16 @@
-function SmallAreaMap = RemovingSmallAreas( ImgMat, areasize )
-intmap=bwlabeln(imbinarize(ImgMat));
+function SmallAreaMap = RemovingSmallAreas( map, areasize )
+intmap=bwlabeln(imbinarize(map));
 
 figure
 imagesc(imbinarize(intmap))
 title('Map of Areas')
 
-STATS=regionprops(intmap,'Area');
-
+STATS=regionprops(intmap,'area');
+DataOut.STATS=STATS;
 for j=1:length(STATS)
     stats(j)=STATS(j).Area;
 end
-SmallAreaMap=zeros(size(ImgMat));
+SmallAreaMap=zeros(size(map));
 nostats=find(stats<areasize);
 for i=1:length(nostats)
     SmallAreaMap(intmap==nostats(i))=1;

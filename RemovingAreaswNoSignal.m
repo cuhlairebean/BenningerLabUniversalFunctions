@@ -5,12 +5,11 @@ NoSignalMap=zeros(sx,sy);
 NoSignalMask=zeros(sx,sy);
 %%Nurin's original threshhold cutoff from averages of no signal area
 
-NoSignalMap(find(peakAmpMap>=0.001 & peakAmpMap<=thresh*(.9)))=1;
+NoSignalMap(find(peakAmpMap>=0.001 & peakAmpMap<=thresh*(1)))=1;
 %  NoSignalMask=logical(NoSignalMap);
 NoSignalMap=imfilter(NoSignalMap, [3 3], 'replicate');
 NoSignalMap=bwlabeln(NoSignalMap,8);
 NoSignalMap(find(peakAmpMap==0))=0;
-
 NoSignalMask(find(NoSignalMap>0))=1;
 NoSignalMask=logical(NoSignalMask);
 
