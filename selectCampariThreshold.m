@@ -17,28 +17,81 @@ function [threshold, bg] = selectCampariThreshold(greenImg, redImg, baseName, ex
 %   5) sheets 'Thresholds' (Filename, Threshold) and 'background_values'
 %      (Filename, Green_Background, Red_Background) are updated: row for baseName
 %      is replaced if it exists, otherwise appended. Other sheets are not touched.
-% Image keys: a = brighten, s = dim.
+% Window: red channel (magenta) | green channel | overlay where the ROIs are drawn (all zoom together).
+% Keys: n/m = dim/brighten magenta, f/g = dim/brighten green, v/b = both; mouse wheel or =/- zoom, 0 = reset view.
 threshold = NaN; bg = [NaN NaN];   % bg = [green red] background values (second output)
 keys = cellstr(baseName);          % one or several Excel row keys (e.g. filename_islet1, filename_islet2)
 baseName = keys{1};                % used for window titles
 greenImg = double(greenImg); redImg = double(redImg);
 if ~isequal(size(greenImg),size(redImg)), error('Green and red images must be the same size.'); end
 
-fig = figure('Name',['CaMPARI threshold: ' baseName],'NumberTitle','off');
-ax = axes('Parent',fig);
-gain = 1;
-rgbBase = cat(3, redImg/max(redImg(:)), greenImg/max(greenImg(:)), zeros(size(redImg)));
-hImg = imshow(min(1,rgbBase*gain),'Parent',ax);
-set(fig,'KeyPressFcn',@(~,e) keyCb(e));
+fig = figure('Name',['CaMPARI threshold: ' baseName],'NumberTitle','off','Units','normalized','Position',[0.03 0.1 0.94 0.75]);
+axM = axes('Parent',fig,'Position',[0.01 0.12 0.2 0.75]);    % red channel shown as magenta
+axG = axes('Parent',fig,'Position',[0.22 0.12 0.2 0.75]);    % green channel
+ax  = axes('Parent',fig,'Position',[0.44 0.03 0.55 0.85]);   % overlay: ROIs are drawn here
+gM = 1; gG = 1;                                              % brightness (gain) of the magenta / green channels
+cM = 1; cG = 1;                                              % contrast (display exponent: >1 darkens dim pixels = more contrast)
+nrm = @(im) (im-min(im(:)))/max(eps,max(im(:))-min(im(:)));
+rN = nrm(redImg); gN = nrm(greenImg);
+dispCh = @(x,g,c) min(1,x*g).^c;
+hM = imshow(cat(3,dispCh(rN,gM,cM),zeros(size(rN)),dispCh(rN,gM,cM)),'Parent',axM);
+hG = imshow(cat(3,zeros(size(gN)),dispCh(gN,gG,cG),zeros(size(gN))),'Parent',axG);
+hImg = imshow(cat(3,dispCh(rN,gM,cM),dispCh(gN,gG,cG),dispCh(rN,gM,cM)),'Parent',ax);
+title(axM,'RED channel (magenta)','Interpreter','none'); title(axG,'GREEN channel','Interpreter','none');
+linkaxes([axM axG ax]);
+set(fig,'KeyPressFcn',@(~,e) keyCb(e),'WindowScrollWheelFcn',@(~,e) scrollCb(e));
     function keyCb(e)
         switch lower(e.Key)
-            case 'a', gain = gain*1.25; set(hImg,'CData',min(1,rgbBase*gain));
-            case 's', gain = max(0.05,gain/1.25); set(hImg,'CData',min(1,rgbBase*gain));
+            case 'n', gM = max(0.05,gM/1.25);          % magenta dimmer
+            case 'm', gM = gM*1.25;                    % magenta brighter
+            case 'f', gG = max(0.05,gG/1.25);          % green dimmer
+            case 'g', gG = gG*1.25;                    % green brighter
+            case 'v', gM = max(0.05,gM/1.25); gG = max(0.05,gG/1.25);   % both dimmer
+            case 'b', gM = gM*1.25; gG = gG*1.25;                       % both brighter
+            case 'j', cM = max(0.2,cM/1.15);           % magenta contrast down
+            case 'k', cM = min(5,cM*1.15);             % magenta contrast up
+            case 's', cG = max(0.2,cG/1.15);           % green contrast down
+            case 'd', cG = min(5,cG*1.15);             % green contrast up
+            case 'comma',  cM = max(0.2,cM/1.15); cG = max(0.2,cG/1.15);   % both contrast down
+            case 'period', cM = min(5,cM*1.15);   cG = min(5,cG*1.15);     % both contrast up
+            case {'equal','add'},      zoomAt(ax,[],0.8);                % zoom in
+            case {'hyphen','subtract'}, zoomAt(ax,[],1.25);              % zoom out
+            case '0', axis(ax,'image');                                  % reset view
+            case 'r', gM = 1; gG = 1; cM = 1; cG = 1;                    % reset brightness + contrast
+            otherwise, return;
+        end
+        refreshImgs();
+    end
+    function refreshImgs()
+        m = dispCh(rN,gM,cM); g = dispCh(gN,gG,cG);
+        set(hM,'CData',cat(3,m,zeros(size(rN)),m));
+        set(hG,'CData',cat(3,zeros(size(gN)),g,zeros(size(gN))));
+        set(hImg,'CData',cat(3,m,g,m));
+    end
+    function scrollCb(e)
+        % mouse wheel zooms about the cursor in whichever panel it is over (all panels stay linked)
+        for aa = [ax axG axM]
+            cp = aa.CurrentPoint(1,1:2);
+            xl = aa.XLim; yl = aa.YLim;
+            if cp(1)>=xl(1) && cp(1)<=xl(2) && cp(2)>=yl(1) && cp(2)<=yl(2)
+                zoomAt(aa,cp,1.25^sign(e.VerticalScrollCount)); return;
+            end
         end
     end
+    function zoomAt(aa,c,f)
+        xl = aa.XLim; yl = aa.YLim;
+        if isempty(c), c = [mean(xl) mean(yl)]; end
+        sz = [size(redImg,2) size(redImg,1)];
+        nx = c(1)+(xl-c(1))*f; ny = c(2)+(yl-c(2))*f;
+        if diff(nx) >= sz(1), nx = [0.5 sz(1)+0.5]; end      % never zoom out past the full image
+        if diff(ny) >= sz(2), ny = [0.5 sz(2)+0.5]; end
+        aa.XLim = nx; aa.YLim = ny;
+    end
+keyHelp = sprintf('BRIGHTNESS: [n/m] magenta -/+ | [f/g] green -/+ | [v/b] both -/+     CONTRAST: [j/k] magenta -/+ | [s/d] green -/+ | [,/.] both -/+\nZOOM: scroll or [=]/[-] | [0] reset view | [r] reset brightness+contrast');
+
 
 % 1) background
-title(ax,{'BACKGROUND = AUTOFLUORESCENCE: draw an ROI on CaMPARI-NEGATIVE cells (not empty space), then press ENTER','[a] brighten | [s] dim'},'Interpreter','none');
+title(ax,{'BACKGROUND = AUTOFLUORESCENCE: draw an ROI on CaMPARI-NEGATIVE cells (not empty space), then press ENTER',keyHelp},'Interpreter','none');
 roi = drawfreehand(ax,'Color',[1 1 0]);
 waitKey(fig,{'return'});
 bgMask = createMask(roi);
@@ -52,7 +105,7 @@ redRatio   = collectRatios('RED',[1 0 0]);
         ratios = [];
         while isvalid(fig)
             title(ax,{sprintf('%s CELLS (#%d): draw ROI, ENTER = commit',label,numel(ratios)+1), ...
-                'SPACE = done with this group | [a] brighten | [s] dim'},'Interpreter','none');
+                ['SPACE = done with this group | ' keyHelp]},'Interpreter','none');
             r = drawfreehand(ax,'Color',col);
             k = waitKey(fig,{'return','space'});
             if strcmp(k,'space')
@@ -70,14 +123,17 @@ if isempty(greenRatio) && isempty(redRatio)
 end
 
 % 4) click threshold
+sty = get_campari_style();
 f2 = figure('Name',['Ratio threshold: ' baseName],'NumberTitle','off'); hold on;
-scatter(1+(rand(size(greenRatio))-0.5)*0.25,greenRatio,60,[0 0.8 0],'filled');
-scatter(2+(rand(size(redRatio))-0.5)*0.25,redRatio,60,[0.9 0 0],'filled');
+scatter(1+(rand(size(greenRatio))-0.5)*0.25,greenRatio,60,sty.colors('green'),'filled');
+scatter(2+(rand(size(redRatio))-0.5)*0.25,redRatio,60,sty.colors('magenta'),'filled');
 xlim([0.5 2.5]); xticks([1 2]); xticklabels({'Green cells','Red cells'});
 ylabel('Red/Green ratio (background-subtracted)'); grid on;
+fnT = sty.font_name; if ~any(strcmp(listfonts,fnT)), fnT = get(groot,'defaultAxesFontName'); end
+set(gca,'FontName',fnT,'FontSize',sty.axis_size);
 accepted = false;
 while ~accepted
-    title(f2,{baseName,'CLICK on the plot to set the threshold'},'Interpreter','none');
+    title(gca(f2),{baseName,'CLICK on the plot to set the threshold'},'Interpreter','none');
     [~,threshold] = ginput(1);
     if isempty(threshold), threshold = NaN; break; end
     hl = yline(threshold,'b--',sprintf('Threshold = %.3f',threshold),'LineWidth',2);

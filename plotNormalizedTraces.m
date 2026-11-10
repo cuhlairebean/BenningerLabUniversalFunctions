@@ -13,9 +13,12 @@ function [fig, cls, means] = plotNormalizedTraces(t, N, xlab, ttl, ratio, thresh
 %   cls        cellstr per cell: 'red' / 'green' / 'unclassified' (all 'all' for the plain figure)
 %   means      struct with .all .red .green (frames x 1, NaN if that group is empty)
 
-ALPHA = 0.3;
+ALPHA = 0.1;
 nC = size(N,2);
 campari = nargin >= 6 && ~isempty(ratio) && ~isnan(threshold) && numel(ratio) == nC;
+% CaMPARI theme (colors/font/sizes) is used ONLY for CaMPARI figures; the main script passes ratio/threshold
+% only when the user is Evelyn, so everyone else gets the plain default figure.
+if campari, sty = get_campari_style(); end
 fig = figure('Name',['Normalized traces ' ttl]);
 ax = axes('Parent',fig); hold(ax,'on');
 cls = repmat({'all'},1,nC);
@@ -29,7 +32,7 @@ if ~campari
     legend(ax,hAll,sprintf('Mean, all cells (n=%d)',nC),'Location','best','Box','off');
 else
     ratio = ratio(:)';
-    gCol = [0 0.75 0]; mCol = [1 0 1];
+    gCol = sty.colors('green'); mCol = sty.colors('magenta');
     dev = max(abs(ratio(~isnan(ratio)) - threshold));
     if isempty(dev) || dev == 0, dev = 1; end
     isRed = ratio >= threshold; isGreen = ratio < threshold;      % NaN -> both false
@@ -58,4 +61,10 @@ end
 xlabel(ax,xlab); ylabel(ax,'\DeltaF/F');
 title(ax,ttl,'Interpreter','none');
 box(ax,'off');
+if campari   % CaMPARI theme font (falls back to the default font if not installed)
+    fn = sty.font_name; if ~any(strcmp(listfonts,fn)), fn = get(groot,'defaultAxesFontName'); end
+    set(ax,'FontName',fn,'FontSize',sty.axis_size);
+    ax.Title.FontSize = sty.title_size; ax.Title.FontName = fn;
+    ax.XLabel.FontSize = sty.axis_size; ax.YLabel.FontSize = sty.axis_size;
+end
 end
