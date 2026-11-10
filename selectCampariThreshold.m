@@ -1,4 +1,4 @@
-function threshold = selectCampariThreshold(greenImg, redImg, baseName, excelPath)
+function [threshold, bg] = selectCampariThreshold(greenImg, redImg, baseName, excelPath)
 % SELECTCAMPARITHRESHOLD  Pick the red/green ratio threshold separating "green" from "red"
 % CaMPARI cells for ONE experiment and save it into an existing Excel file.
 %
@@ -18,7 +18,7 @@ function threshold = selectCampariThreshold(greenImg, redImg, baseName, excelPat
 %      (Filename, Green_Background, Red_Background) are updated: row for baseName
 %      is replaced if it exists, otherwise appended. Other sheets are not touched.
 % Image keys: a = brighten, s = dim.
-threshold = NaN;
+threshold = NaN; bg = [NaN NaN];   % bg = [green red] background values (second output)
 keys = cellstr(baseName);          % one or several Excel row keys (e.g. filename_islet1, filename_islet2)
 baseName = keys{1};                % used for window titles
 greenImg = double(greenImg); redImg = double(redImg);
@@ -38,11 +38,11 @@ set(fig,'KeyPressFcn',@(~,e) keyCb(e));
     end
 
 % 1) background
-title(ax,{'BACKGROUND: draw an ROI, then press ENTER','[a] brighten | [s] dim'},'Interpreter','none');
+title(ax,{'BACKGROUND = AUTOFLUORESCENCE: draw an ROI on CaMPARI-NEGATIVE cells (not empty space), then press ENTER','[a] brighten | [s] dim'},'Interpreter','none');
 roi = drawfreehand(ax,'Color',[1 1 0]);
 waitKey(fig,{'return'});
 bgMask = createMask(roi);
-gBkg = mean(greenImg(bgMask)); rBkg = mean(redImg(bgMask));
+gBkg = mean(greenImg(bgMask)); rBkg = mean(redImg(bgMask)); bg = [gBkg rBkg];
 roi.InteractionsAllowed = 'none';
 
 % 2) + 3) cells
