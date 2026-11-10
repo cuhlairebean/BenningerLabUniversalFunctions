@@ -1,43 +1,46 @@
-function written = processAndExportPeriods(CellTC, periods, timeVec, outPrefix, procChoices, cellLabels)
-%PROCESSANDEXPORTPERIODS  Detrend / baseline-normalize cell timecourses and export to Excel.
+function [written, mats] = processAndExportPeriods(CellTC, periods, timeVec, outPrefix, cellLabels, multiplyNeg1, writeFiles)
+%PROCESSANDEXPORTPERIODS  Per-cell detrend, baseline-normalize the original data, optional x -1,
+%   and export to <outPrefix>_normalized.xlsx.
 %
-%   written = processAndExportPeriods(CellTC, periods, timeVec, outPrefix, procChoices, cellLabels)
+%   [written, mats] = processAndExportPeriods(CellTC, periods, timeVec, outPrefix, cellLabels, multiplyNeg1, writeFiles)
 %
-%   CellTC       time x cells matrix (one islet)
+%   CellTC       time x cells matrix (one islet), RAW intensities (NOT already multiplied by -1)
 %   periods      struct array with .name .start .end  (1-based frame indices, as saved by
 %                selectTimeRanges / *_PeriodIndices.mat). 'Baseline' is needed for normalization;
 %                'Low glucose','High glucose','Drug' only LABEL frames and give per-period means.
 %   timeVec      time stamp of every frame (seconds) - frame index is used if empty
-%   outPrefix    e.g. fullfile(output_dir,[filename '_islet2'])  ->  <outPrefix>_<processing>.xlsx
-%   procChoices  cellstr subset of {'detrended','normalized','normalized_inverted',
-%                'normalized_minus_mean'}   (default: all)
+%   outPrefix    e.g. fullfile(output_dir,[filename '_islet2'])  ->  <outPrefix>_normalized.xlsx
 %   cellLabels   cellstr, one name per column of CellTC (default cell1..cellN)
+%   multiplyNeg1 (default false) multiply the normalized data by -1 (done LAST)
+%   writeFiles   (default true) false = only compute: no Excel file is written
 %
-%   The WHOLE matrix is processed (every frame, including frames outside any selected period):
-%     detrended              one linear trendline per cell over the whole recording removed
-%     normalized             (x - mean_baseline) / mean_baseline   (ORIGINAL data)
-%     normalized_inverted    -1 * normalized
-%     normalized_minus_mean  normalized - mean(normalized over the whole recording)
-%   mean_baseline = mean of each cell over the 'Baseline' period you selected.
+%   Order of operations, on the WHOLE matrix (every frame, also outside any selected period):
+%     1) detrend    PER CELL: each cell's own linear regression vs time gives
+%                   trendline = slope*time + intercept, subtracted from that cell  -> .detrended
+%     2) normalize  the DETRENDED data: (D - mean_baseline) / mean_baseline, with mean_baseline the
+%                   mean of D over the user-selected 'Baseline' period
+%     3) x -1       only if multiplyNeg1, applied LAST to the normalized data         -> .normalized
+%   (No condition-by-condition segmentation as in the old Python code.)
 %
-%   Excel sheets:  'data'  index | time | condition | one column per cell, all frames. The
-%                          'condition' column only labels which selected period(s) a frame is in
-%                          (blank = in none).
-%                  'Means' mean of each cell over the whole recording and in each selected period
+%   mats         struct: .detrended, .trendline, .normalized (time x cells)
+%   Excel sheets:  'data'      index | time | condition | one column per cell (normalized, final)
+%                  'detrended' index | time | one column per cell (step 1)
+%                  'Means'     mean of each cell over the whole recording and in each selected period
 %                  'Conditions' start/end frames of the selected periods (incl. baseline)
 
 exportNames = {'Low glucose','High glucose','Drug'};
-allProcs = {'detrended','normalized','normalized_inverted','normalized_minus_mean'};
-if nargin < 5 || isempty(procChoices), procChoices = allProcs; end
 [nT, nC] = size(CellTC);
-if nargin < 6 || isempty(cellLabels)
+if nargin < 5 || isempty(cellLabels)
     cellLabels = arrayfun(@(j) sprintf('cell%d',j),1:nC,'UniformOutput',false);
 end
+if nargin < 6 || isempty(multiplyNeg1), multiplyNeg1 = false; end
+if nargin < 7 || isempty(writeFiles), writeFiles = true; end
 if nargin < 3 || isempty(timeVec), timeVec = (1:nT)'; end
 timeVec = timeVec(:);
 if numel(timeVec) < nT, timeVec(end+1:nT,1) = NaN; end
 timeVec = timeVec(1:nT);
 written = {};
+mats = struct();
 
 % ---- resolve ranges (clip / skip anything out of range) ----
 exportR = struct('name',{},'start',{},'end',{},'note',{});
@@ -59,12 +62,6 @@ for i = 1:numel(exportR)
     end
 end
 
-% ---- baseline mean per cell ----
-baseMean = nan(1,nC);
-if ~isempty(baseR)
-    baseMean = mean(CellTC(baseR.start:baseR.end,:),1,'omitnan');
-end
-
 % ---- Conditions sheet (periods are labels only; processing uses the whole matrix) ----
 rows = [exportR, baseR];
 condNames = {exportR.name}';
@@ -81,59 +78,86 @@ end
 tAll = timeVec;
 if all(isnan(tAll)), tAll = (1:nT)'; end
 
-for p = 1:numel(procChoices)
-    proc = procChoices{p};
-    if ~strcmp(proc,'detrended') && all(isnan(baseMean))
-        warning('processAndExportPeriods:noBaseline', ...
-            '%s: no usable Baseline period - skipping %s.',outPrefix,proc);
-        continue
+% ---- 1) DETREND, PER CELL (same method as the Python pipeline) ----
+% Each cell contains a unique concentration of the fluorescent indicator and is positioned at a slightly
+% different depth, leading to varying levels of excitation light exposure and unique bleaching kinetics.
+% Detrending on a per-cell basis captures these distinct baseline decays.
+%   slope/intercept = linear regression of the cell's own trace vs time   (linregress)
+%   trendline       = slope * time + intercept                            (y = m x + b)
+%   detrended       = original array - trendline   (drift_corrected_array in Python)
+D = nan(nT,nC);
+trendline = nan(nT,nC);
+for c = 1:nC
+    y = CellTC(:,c);
+    ok = ~isnan(y) & ~isnan(tAll);
+    if nnz(ok) >= 2
+        co = polyfit(tAll(ok),y(ok),1);              % co(1) = slope, co(2) = intercept
+        tl = co(1)*tAll + co(2);
+        trendline(:,c) = tl;
+        D(:,c) = y - tl;
+    else
+        warning('processAndExportPeriods:noTrend','%s %s: not enough valid points for a trendline - left undetrended.',outPrefix,cellLabels{c});
+        trendline(:,c) = 0;
+        D(:,c) = y;
     end
-    % ---- whole matrix, every frame (including frames outside any selected period) ----
-    switch proc
-        case 'detrended'
-            M = nan(nT,nC);
-            for c = 1:nC
-                y = CellTC(:,c); ok = ~isnan(y) & ~isnan(tAll);
-                if nnz(ok) >= 2
-                    co = polyfit(tAll(ok),y(ok),1);      % one linear trend per cell over the whole recording
-                    M(:,c) = y - polyval(co,tAll);
-                else
-                    M(:,c) = y;
-                end
-            end
-        otherwise
-            M = (CellTC - baseMean) ./ baseMean;         % ORIGINAL data / baseline mean
-            M(:, baseMean == 0 | isnan(baseMean)) = NaN;
-            if strcmp(proc,'normalized_inverted')
-                M = -1 * M;
-            elseif strcmp(proc,'normalized_minus_mean')
-                M = M - mean(M,1,'omitnan');             % mean of the whole recording
-            end
-    end
+end
+mats.detrended = D;
+mats.trendline = trendline;
 
-    % ---- Means: whole recording first, then each selected period ----
-    meanNames = [{'Whole recording'}, {exportR.name}];
-    meansM = nan(numel(meanNames),nC);
-    meansM(1,:) = mean(M,1,'omitnan');
-    for i = 1:numel(exportR)
-        meansM(i+1,:) = mean(M(exportR(i).start:exportR(i).end,:),1,'omitnan');
-    end
+% ---- 2) NORMALIZE the DETRENDED data to the mean of its (detrended) baseline period ----
+% normalized = (D - baseline_mean) / baseline_mean, D = detrended data, baseline_mean = mean of D over the
+% user-selected 'Baseline' period. (The Python condition-by-condition segmentation is intentionally not
+% used: it was a limitation of the old code; the baseline is the period selected in MATLAB.)
+if isempty(baseR)
+    warning('processAndExportPeriods:noBaseline', ...
+        '%s: no usable Baseline period - cannot normalize.',outPrefix);
+    return
+end
+baseMean = mean(D(baseR.start:baseR.end,:),1,'omitnan');
+% Denominator guard: after detrending a baseline mean can be 0 (or so close to 0 that the division
+% explodes). In that case 0.001 is added to the denominator (in the direction of its sign).
+DENOM_EPS = 0.001;
+denom = baseMean;
+tiny = abs(denom) < DENOM_EPS;                        % includes exactly 0
+sgn = ones(size(denom)); sgn(denom < 0) = -1;
+denom(tiny) = denom(tiny) + sgn(tiny)*DENOM_EPS;
+if any(tiny)
+    warning('processAndExportPeriods:denomCorrected','%s: 0.001 added to the baseline denominator of %d cell(s): %s', ...
+        outPrefix,nnz(tiny),strjoin(cellLabels(tiny),', '));
+end
+M = (D - baseMean) ./ denom;                          % numerator uses the true baseline mean
+M(:, isnan(baseMean)) = NaN;
 
-    dataTbl = table((1:nT)',timeVec,condCol,'VariableNames',{'index','time','condition'});
-    dataTbl = [dataTbl, array2table(M,'VariableNames',cellLabels)];
-    meansTbl = [table(meanNames(:),'VariableNames',{'Period'}), ...
-                array2table(meansM,'VariableNames',cellLabels), ...
-                table(mean(meansM,2,'omitnan'),'VariableNames',{'mean_across_cells'})];
+% ---- 3) multiply by -1 LAST, if selected ----
+if multiplyNeg1, M = -1 * M; end
+mats.normalized = M;
+if ~writeFiles, return; end
 
-    xlsxPath = [outPrefix '_' proc '.xlsx'];
-    if exist(xlsxPath,'file'), delete(xlsxPath); end
-    writetable(dataTbl,  xlsxPath,'Sheet','data');
-    writetable(meansTbl, xlsxPath,'Sheet','Means');
-    writetable(condTbl,  xlsxPath,'Sheet','Conditions');
-    written{end+1} = xlsxPath; %#ok<AGROW>
-    fprintf('  saved %s\n',xlsxPath);
+% ---- Means: whole recording first, then each selected period ----
+meanNames = [{'Whole recording'}, {exportR.name}];
+meansM = nan(numel(meanNames),nC);
+meansM(1,:) = mean(M,1,'omitnan');
+for i = 1:numel(exportR)
+    meansM(i+1,:) = mean(M(exportR(i).start:exportR(i).end,:),1,'omitnan');
 end
 
+dataTbl = table((1:nT)',timeVec,condCol,'VariableNames',{'index','time','condition'});
+dataTbl = [dataTbl, array2table(M,'VariableNames',cellLabels)];
+detTbl  = [table((1:nT)',timeVec,'VariableNames',{'index','time'}), array2table(D,'VariableNames',cellLabels)];
+trendTbl = [table((1:nT)',timeVec,'VariableNames',{'index','time'}), array2table(trendline,'VariableNames',cellLabels)];
+meansTbl = [table(meanNames(:),'VariableNames',{'Period'}), ...
+            array2table(meansM,'VariableNames',cellLabels), ...
+            table(mean(meansM,2,'omitnan'),'VariableNames',{'mean_across_cells'})];
+
+xlsxPath = [outPrefix '_normalized.xlsx'];
+if exist(xlsxPath,'file'), delete(xlsxPath); end
+writetable(dataTbl,  xlsxPath,'Sheet','data');
+writetable(detTbl,   xlsxPath,'Sheet','detrended');
+writetable(trendTbl, xlsxPath,'Sheet','trendline');
+writetable(meansTbl, xlsxPath,'Sheet','Means');
+writetable(condTbl,  xlsxPath,'Sheet','Conditions');
+written{end+1} = xlsxPath;
+fprintf('  saved %s\n',xlsxPath);
 end
 
 function r = getRange(periods, name, nT)
