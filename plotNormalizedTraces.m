@@ -32,16 +32,27 @@ if ~campari
     legend(ax,hAll,sprintf('Mean, all cells (n=%d)',nC),'Location','best','Box','off');
 else
     ratio = ratio(:)';
-    gCol = sty.colors('green'); mCol = sty.colors('magenta');
-    dev = max(abs(ratio(~isnan(ratio)) - threshold));
-    if isempty(dev) || dev == 0, dev = 1; end
+    gCol = sty.colors('green'); mCol = sty.colors('magenta'); yCol = sty.colors('Yellow');
+    % gradient by colour stops (position 0-1 along the colorbar, 0.5 = threshold), linear between stops:
+    %   0% green #339933 | 34% #ADDE43 | 50% #D9BF1A (threshold) | 62% #E0B9ED | 100% magenta #D784FF
+    stopPos = [0 0.34 0.50 0.62 1];
+    stopCol = [gCol; [173 222 67]/255; [217 191 26]/255; [224 185 237]/255; mCol];
+    grad = @(f) interp1(stopPos,stopCol,min(max(f,0),1));
+    % Yellow (#D9BF1A) sits at ratio = threshold ALWAYS (0 on the "ratio - threshold" axis). Each side has its own
+    % scale: below the threshold the green end is the lowest ratio, above it the magenta end is the highest ratio,
+    % and the intermediate stops (34% / 62%) are placed relative to that, so yellow never moves.
+    rv = ratio(~isnan(ratio));
+    dmin = max(0,threshold - min(rv)); dmax = max(0,max(rv) - threshold);
+    if isempty(rv) || (dmin == 0 && dmax == 0), dmin = 1; dmax = 1; end
+    if dmin == 0, dmin = dmax; end
+    if dmax == 0, dmax = dmin; end
+    fmap = @(r) min(max(0.5 + 0.5*(r-threshold)./(dmax*(r>=threshold) + dmin*(r<threshold)),0),1);
     isRed = ratio >= threshold; isGreen = ratio < threshold;      % NaN -> both false
     cls(isRed) = {'red'}; cls(isGreen) = {'green'}; cls(isnan(ratio)) = {'unclassified'};
     for c = 1:nC
         if isnan(ratio(c)), col = [0.5 0.5 0.5];
         else
-            f = min(max(0.5 + 0.5*(ratio(c)-threshold)/dev, 0), 1);   % 0.5 = at threshold
-            col = (1-f)*gCol + f*mCol;
+            col = grad(fmap(ratio(c)));
         end
         plot(ax,t,N(:,c),'Color',[col ALPHA],'LineWidth',0.5);
     end
@@ -52,11 +63,23 @@ else
     if any(isRed),   hR = plot(ax,t,means.red,'Color',mCol,'LineWidth',2.5);  hh(end+1) = hR; lbl{end+1} = sprintf('Mean, red cells (n=%d)',nnz(isRed)); end
     if any(isGreen), hG = plot(ax,t,means.green,'Color',gCol,'LineWidth',2.5); hh(end+1) = hG; lbl{end+1} = sprintf('Mean, green cells (n=%d)',nnz(isGreen)); end
     legend(ax,hh,lbl,'Location','best','Box','off');
-    % colour scale = the red:green ratio, threshold in the middle
-    nCol = 64; f = linspace(0,1,nCol)';
-    colormap(ax,(1-f)*gCol + f*mCol);
-    caxis(ax,[threshold-dev threshold+dev]);
-    cb = colorbar(ax); cb.Label.String = sprintf('Red:Green ratio (threshold = %.3g)',threshold);
+    % colour scale = the red:green ratio; the colormap follows the same mapping, so yellow is at the threshold
+    nCol = 128; vals = linspace(threshold-dmin,threshold+dmax,nCol)';
+    cm = zeros(nCol,3);
+    for q = 1:nCol, cm(q,:) = grad(fmap(vals(q))); end
+    colormap(ax,cm);
+    caxis(ax,[threshold-dmin threshold+dmax]);
+    cb = colorbar(ax); cb.Label.String = sprintf('Red:Green ratio (threshold = %.2f)',threshold);
+    % ticks with 2 decimals; ticks too close to the threshold are dropped so its label stays readable
+    lo = threshold-dmin; hi = threshold+dmax;
+    tk = cb.Ticks; tk = tk(abs(tk-threshold) > 0.08*(hi-lo));
+    cb.Ticks = sort([tk, threshold]);
+    cb.TickLabels = arrayfun(@(v) sprintf('%.2f',v),cb.Ticks,'UniformOutput',false);
+    % the threshold gets a grey, translucent, bold mark just across the colorbar
+    thrLine = annotation(fig,'line',[0 0],[0 0],'LineWidth',3);
+    try, thrLine.Color = [0.35 0.35 0.35 0.6]; catch, thrLine.Color = [0.6 0.6 0.6]; end   % alpha needs a recent MATLAB
+    set(fig,'SizeChangedFcn',@(~,~) placeThrMark(cb,thrLine,threshold,lo,hi,ax));
+    drawnow; placeThrMark(cb,thrLine,threshold,lo,hi,ax);
 end
 xlabel(ax,xlab); ylabel(ax,'\DeltaF/F');
 title(ax,ttl,'Interpreter','none');
@@ -67,4 +90,19 @@ if campari   % CaMPARI theme font (falls back to the default font if not install
     ax.Title.FontSize = sty.title_size; ax.Title.FontName = fn;
     ax.XLabel.FontSize = sty.axis_size; ax.YLabel.FontSize = sty.axis_size;
 end
+applyLightTheme(fig);   % white background, black fonts/axes
+if campari, drawnow; placeThrMark(cb,thrLine,threshold,lo,hi,ax); end   % layout may have shifted with the fonts
+end
+
+function placeThrMark(cb,ln,thr,lo,hi,ax)
+% 1) colorbar height = 25% of the plot height, vertically centred on the plot;
+% 2) short grey line across the colorbar at the threshold (figure-normalized units; follows on resize)
+if ~isvalid(cb) || ~isvalid(ln), return; end
+oldU = cb.Units; cb.Units = 'normalized';
+oldA = ax.Units; ax.Units = 'normalized'; ap = ax.Position; ax.Units = oldA;
+p = cb.Position;
+p(4) = 0.25*ap(4); p(2) = ap(2) + 0.5*(ap(4)-p(4));
+cb.Position = p; cb.Units = oldU;
+y = p(2) + p(4)*(thr-lo)/(hi-lo);
+set(ln,'X',[p(1)-0.15*p(3), p(1)+1.15*p(3)],'Y',[y y]);
 end

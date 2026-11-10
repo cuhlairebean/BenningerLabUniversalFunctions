@@ -131,6 +131,7 @@ xlim([0.5 2.5]); xticks([1 2]); xticklabels({'Green cells','Red cells'});
 ylabel('Red/Green ratio (background-subtracted)'); grid on;
 fnT = sty.font_name; if ~any(strcmp(listfonts,fnT)), fnT = get(groot,'defaultAxesFontName'); end
 set(gca,'FontName',fnT,'FontSize',sty.axis_size);
+applyLightTheme(f2);
 accepted = false;
 while ~accepted
     title(gca(f2),{baseName,'CLICK on the plot to set the threshold'},'Interpreter','none');
