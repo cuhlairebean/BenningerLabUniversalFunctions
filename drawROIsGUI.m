@@ -36,6 +36,7 @@ addParameter(p,'Overlay',[]);
 addParameter(p,'ChannelNames',{});
 addParameter(p,'ParentMask',[]);
 addParameter(p,'ParentName','Islet');
+addParameter(p,'ExistingLabels',[]);   % label matrix of ROIs drawn earlier: shown (numbered), kept, new ROIs continue the numbering
 parse(p,varargin{:});
 opt = p.Results;
 
@@ -116,6 +117,26 @@ if hasParent
     end
 end
 
+% previously drawn ROIs (kept; cannot be undone here, new ROIs are numbered after them)
+nExisting = 0;
+if ~isempty(opt.ExistingLabels)
+    ex = double(opt.ExistingLabels);
+    nExisting = max(ex(:));
+    for n = 1:nExisting
+        m = (ex == n);
+        masks{n} = m; hLines{n} = []; hTexts{n} = []; parentIdx(n,1) = 0; parentFrac(n,1) = 0; %#ok<AGROW>
+        if ~any(m(:)), continue; end
+        pi_ = 0; pf = 0;
+        if hasParent, [pi_,pf] = roiParentAssignment(double(m),opt.ParentMask); end
+        parentIdx(n,1) = pi_; parentFrac(n,1) = pf;
+        if pi_ > 0, col = pcols(pi_,:); else, col = [1 1 1]; end
+        B = bwboundaries(m);
+        hLines{n} = plot(ax,B{1}(:,2),B{1}(:,1),'-','Color',col,'LineWidth',1.5);
+        [r,c] = find(m);
+        hTexts{n} = text(ax,mean(c),mean(r),num2str(n),'Color',col,'FontWeight','bold','HorizontalAlignment','center');
+    end
+end
+
 setappdata(fig,'done',false);
 set(fig,'WindowKeyPressFcn',@onKey,'CloseRequestFcn',@onClose);
 updateBase(); showHelp(); setStatus('Press h for keys. d = draw ROI, Enter = finish.');
@@ -128,6 +149,7 @@ end
 
 roiLabel = zeros(sx,sy);
 for n = 1:numel(masks), roiLabel(masks{n}) = n; end
+if nExisting > 0, roiLabel(opt.ExistingLabels > 0 & roiLabel == 0) = opt.ExistingLabels(opt.ExistingLabels > 0 & roiLabel == 0); end
 info.masks = masks; info.parentIdx = parentIdx; info.parentOverlap = parentFrac;
 if isvalid(fig), delete(fig); end
 
@@ -270,7 +292,7 @@ if isvalid(fig), delete(fig); end
 
     function undoROI()
         n = numel(masks);
-        if n == 0, return; end
+        if n <= nExisting, setStatus('Nothing to undo (earlier ROIs are kept).'); return; end
         delete(hLines{n}); delete(hTexts{n});
         masks(n) = []; hLines(n) = []; hTexts(n) = [];
         parentIdx(n) = []; parentFrac(n) = [];
