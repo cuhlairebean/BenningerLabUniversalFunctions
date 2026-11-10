@@ -17,10 +17,26 @@ function [written, mats] = processAndExportPeriods(CellTC, periods, timeVec, out
 %   Order of operations, on the WHOLE matrix (every frame, also outside any selected period):
 %     1) detrend    PER CELL: each cell's own linear regression vs time gives
 %                   trendline = slope*time + intercept, subtracted from that cell  -> .detrended
-%     2) normalize  the DETRENDED data: (D - mean_baseline) / mean_baseline, with mean_baseline the
-%                   mean of D over the user-selected 'Baseline' period
+%     2) normalize  normalized = (D - b) / F0, per cell, where
+%                     D  = the detrended trace,
+%                     b  = mean of D over the user-selected 'Baseline' period,
+%                     F0 = mean of the cell's RAW trace over the same 'Baseline' period (its own brightness)
 %     3) x -1       only if multiplyNeg1, applied LAST to the normalized data         -> .normalized
 %   (No condition-by-condition segmentation as in the old Python code.)
+%
+%   WHY THESE STEPS
+%     Detrend:   every cell holds a different amount of indicator and sits at a slightly different depth, so
+%                each one bleaches/drifts at its own rate. Subtracting each cell's OWN straight-line trend
+%                removes that slow drift so that only the calcium activity remains.
+%     (D - b):   shifts the trace so the baseline sits at exactly 0; changes are then "above / below baseline".
+%     / F0:      converts the change into a FRACTION of the cell's own resting brightness (dF/F), so bright and
+%                dim cells, or cells at different depths, can be compared and averaged fairly. F0 is taken from
+%                the RAW trace on purpose: after detrending the cell's brightness has been subtracted away,
+%                so the detrended baseline mean is only the baseline's offset from the fitted line (it can be
+%                ~0 or negative for a dim cell that does not bleach, which would amplify or flip that cell).
+%                Set NORM_DENOM = 'detrended' below to restore that older behaviour.
+%     x -1:      optional, for signals that DECREASE when calcium rises (e.g. Fura-type indicators) so that
+%                calcium rises are plotted upward. Done last so it only flips the sign, never the scaling.
 %
 %   mats         struct: .detrended, .trendline, .normalized (time x cells)
 %   Excel sheets:  'data'      index | time | condition | one column per cell (normalized, final)
@@ -113,20 +129,38 @@ if isempty(baseR)
         '%s: no usable Baseline period - cannot normalize.',outPrefix);
     return
 end
-baseMean = mean(D(baseR.start:baseR.end,:),1,'omitnan');
-% Denominator guard: after detrending a baseline mean can be 0 (or so close to 0 that the division
-% explodes). In that case 0.001 is added to the denominator (in the direction of its sign).
+baseMean = mean(D(baseR.start:baseR.end,:),1,'omitnan');   % detrended baseline offset (numerator reference)
+% ---- DENOMINATOR: each cell is normalized to ITS OWN baseline brightness F0 ----
+% F0 = mean of that cell's raw trace over the selected Baseline period (always > 0 for fluorescence).
+% (Dividing by the baseline mean of the DETRENDED trace, as before, is NOT a brightness: detrending removes the
+%  cell's level, so that number is just the baseline's offset from the fitted line - tiny/negative for a dim
+%  cell that does not bleach, which amplified or flipped it.)
+% Set NORM_DENOM = 'detrended' to get the old behaviour back.
+NORM_DENOM = 'rawBaseline';
+rawBase = mean(CellTC(baseR.start:baseR.end,:),1,'omitnan');
+switch NORM_DENOM
+    case 'rawBaseline', denom = rawBase;
+    otherwise,          denom = baseMean;
+end
+% Denominator guard against 0 / tiny values: 0.001 is added (in the direction of its sign).
 DENOM_EPS = 0.001;
-denom = baseMean;
 tiny = abs(denom) < DENOM_EPS;                        % includes exactly 0
 sgn = ones(size(denom)); sgn(denom < 0) = -1;
 denom(tiny) = denom(tiny) + sgn(tiny)*DENOM_EPS;
+if writeFiles
+    fprintf('\n[%s] normalization denominators (%s):\n',outPrefix,NORM_DENOM);
+    fprintf('   %-10s  %14s  %16s\n','cell','F0 (raw base)','detrended base');
+    for cc = 1:nC
+        fprintf('   %-10s  %14.4g  %16.4g\n',cellLabels{cc},rawBase(cc),baseMean(cc));
+    end
+    fprintf('\n');
+end
 if any(tiny)
     warning('processAndExportPeriods:denomCorrected','%s: 0.001 added to the baseline denominator of %d cell(s): %s', ...
         outPrefix,nnz(tiny),strjoin(cellLabels(tiny),', '));
 end
-M = (D - baseMean) ./ denom;                          % numerator uses the true baseline mean
-M(:, isnan(baseMean)) = NaN;
+M = (D - baseMean) ./ denom;                          % numerator: detrended data minus its own baseline mean (=0 at baseline)
+M(:, isnan(baseMean) | isnan(denom)) = NaN;
 
 % ---- 3) multiply by -1 LAST, if selected ----
 if multiplyNeg1, M = -1 * M; end

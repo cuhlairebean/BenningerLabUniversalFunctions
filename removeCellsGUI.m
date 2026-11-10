@@ -1,15 +1,22 @@
-function keep = removeCellsGUI(CellTC, cellLabels, titleStr)
+function keep = removeCellsGUI(CellTC, cellLabels, titleStr, displayData, yLabelStr)
 % REMOVECELLSGUI  Plot all cell traces; hover to see the cell name, click a trace to remove it.
-%   keep = removeCellsGUI(CellTC, cellLabels, titleStr)
-%   CellTC     : frames x cells matrix
-%   cellLabels : cell array of names (one per column)
-%   keep       : logical row vector (1 x cells), false = removed.
+%   keep = removeCellsGUI(CellTC, cellLabels, titleStr, displayData, yLabelStr)
+%   CellTC      : frames x cells matrix
+%   cellLabels  : cell array of names (one per column)
+%   displayData : optional frames x cells matrix shown INSTEAD of CellTC (e.g. the normalized dF/F)
+%   yLabelStr   : optional y-axis label for displayData
+%   keep        : logical row vector (1 x cells), false = removed.
 %
 %   - HOVER over the plot: the nearest trace turns red and a tooltip shows its cell label.
 %   - CLICK: asks "Remove <cell>?" (Yes removes it).
 %   - ZOOM: mouse scroll wheel zooms around the cursor; "Reset zoom" button (or key R) resets;
 %           the toolbar zoom/pan tools also work (click-to-remove is paused while a tool is on).
 %   - DONE: press the Done button, ENTER, or close the window.
+yLabelUse = 'Intensity';
+if nargin >= 4 && ~isempty(displayData) && isequal(size(displayData),size(CellTC))
+    CellTC = displayData; yLabelUse = 'Normalized \DeltaF/F';
+end
+if nargin >= 5 && ~isempty(yLabelStr), yLabelUse = yLabelStr; end
 nC = size(CellTC,2);
 nT = size(CellTC,1);
 if nargin < 2 || isempty(cellLabels)
@@ -26,7 +33,7 @@ h = gobjects(1,nC);
 for c = 1:nC
     h(c) = plot(ax,x,CellTC(:,c),'Color',[0.3 0.3 0.3 0.6],'HitTest','off');
 end
-xlabel(ax,'Frame index'); ylabel(ax,'Intensity');
+xlabel(ax,'Frame index'); ylabel(ax,yLabelUse);
 axis(ax,'tight');
 xl0 = xlim(ax); yl0 = ylim(ax);
 tip = text(ax,0,0,'','Visible','off','BackgroundColor',[1 1 0.85],'EdgeColor',[0.4 0.4 0.4], ...
