@@ -29,7 +29,7 @@ if ~campari
         plot(ax,t,N(:,c),'Color',[0.5 0.5 0.5 ALPHA],'LineWidth',0.5);
     end
     hAll = plot(ax,t,means.all,'k','LineWidth',2.5);
-    legend(ax,hAll,sprintf('Mean, all cells (n=%d)',nC),'Location','southoutside','Orientation','horizontal','Box','off','FontSize',9);
+    legend(ax,hAll,sprintf('Mean, all cells (n=%d)',nC),'Location','southoutside','Orientation','horizontal','Box','off','FontSize',9,'TextColor','k');
 else
     ratio = ratio(:)';
     gCol = sty.colors('green'); mCol = sty.colors('magenta'); yCol = sty.colors('Yellow');
@@ -62,7 +62,7 @@ else
     hR = []; hG = []; lbl = {sprintf('Mean, all cells (n=%d)',nC)}; hh = hAll;
     if any(isRed),   hR = plot(ax,t,means.red,'Color',mCol,'LineWidth',2.5);  hh(end+1) = hR; lbl{end+1} = sprintf('Mean, red cells (n=%d)',nnz(isRed)); end
     if any(isGreen), hG = plot(ax,t,means.green,'Color',gCol,'LineWidth',2.5); hh(end+1) = hG; lbl{end+1} = sprintf('Mean, green cells (n=%d)',nnz(isGreen)); end
-    legend(ax,hh,lbl,'Location','southoutside','Orientation','horizontal','Box','off','FontSize',9);
+    legend(ax,hh,lbl,'Location','southoutside','Orientation','horizontal','Box','off','FontSize',9,'TextColor','k');
     % colour scale = the red:green ratio; the colormap follows the same mapping, so yellow is at the threshold
     nCol = 128; vals = linspace(threshold-dmin,threshold+dmax,nCol)';
     cm = zeros(nCol,3);

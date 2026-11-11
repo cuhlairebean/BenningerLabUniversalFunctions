@@ -18,7 +18,11 @@ for a = ax(:)'
     try, a.Title.Color = 'k'; a.XLabel.Color = 'k'; a.YLabel.Color = 'k'; catch, end
 end
 lg = findall(fig,'Type','legend');
-for l = lg(:)', try, set(l,'TextColor','k','Color','w','EdgeColor','k'); catch, end, end
+for l = lg(:)'
+    try, set(l,'TextColor','k'); catch, end
+    try, set(l,'Color','w'); catch, end
+    try, set(l,'EdgeColor','k'); catch, end
+end
 cb = findall(fig,'Type','colorbar');
 for c = cb(:)', try, set(c,'Color','k'); c.Label.Color = 'k'; catch, end, end
 tx = findall(fig,'Type','text');
