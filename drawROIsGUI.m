@@ -15,7 +15,9 @@ function [roiLabel, info] = drawROIsGUI(baseImg, varargin)
 %     t  /  T        overlay more / less opaque (translucent)
 %     1 2 3 4 ...    toggle overlay channel 1,2,3,4...      v  overlay on/off
 %     5 6 7 8        shift overlay left/right/up/down (2 px; shift+key = 10 px)
-%     [  ]           shrink / expand overlay (1%, { } = 5%)   0  reset overlay shift/scale
+%     [  ]           shrink / expand overlay (1%, { } = 5%)   0  reset overlay shift/scale/rotation
+%     z  /  x        rotate overlay CCW / CW (0.5 deg; Z / X = 2 deg)
+%                    (adjust the overlay between islets: ROIs already drawn stay put)
 %     d              draw next ROI (click-drag freehand, release to finish)
 %     u              undo last ROI                          Enter / f   FINISH
 %
@@ -39,6 +41,7 @@ addParameter(p,'ChannelNames',{});
 addParameter(p,'ParentMask',[]);
 addParameter(p,'ParentName','Islet');
 addParameter(p,'ExistingLabels',[]);   % label matrix of ROIs drawn earlier: shown (numbered), kept, new ROIs continue the numbering
+addParameter(p,'ExistingPreLabel',[]); % same ROIs in overlay (_pre.czi) pixel space, as returned earlier in info.preLabel
 parse(p,varargin{:});
 opt = p.Results;
 
@@ -52,8 +55,9 @@ chColors = [1 0 0; 0 1 0; 0 0 1; 1 0 1; 0 1 1; 1 1 0];
 chNames  = {'red','green','blue','magenta','cyan','yellow'};
 
 masks = {}; hLines = {}; hTexts = {}; parentIdx = zeros(0,1); parentFrac = zeros(0,1);
+prePoly = {};   % each new ROI's outline in OVERLAY pixel coordinates (shift/scale/rotation of the overlay at drawing time undone)
 chOn = []; ovNorm = {}; oCenter = 0.5; oWidth = 1; oAlpha = 0.5; ovVisible = true;
-ovDx = 0; ovDy = 0; ovS = 1; xdBase = [1 sy]; ydBase = [1 sx];   % overlay shift (base pixels) and scale
+ovDx = 0; ovDy = 0; ovS = 1; ovRot = 0; xdBase = [1 sy]; ydBase = [1 sx];   % overlay shift (base pixels), scale, rotation (deg)
 ovStep = 2;                                                     % base pixels moved per press of keys 5/6/7/8 (shift+key = 5x)
 status = '';
 
@@ -91,7 +95,9 @@ keyMenu = { ...
     '              (shift+key = 5x step)', ...
     '  [ ]         shrink / expand overlay', ...
     '  { }         same, bigger step', ...
-    '  0           reset overlay shift/scale', ...
+    '  z / x       rotate overlay CCW / CW', ...
+    '              (Z / X = bigger step)', ...
+    '  0           reset overlay shift/scale/rotation', ...
     '', ...
     'ROIs', ...
     '  d           draw next ROI', ...
@@ -160,6 +166,25 @@ roiLabel = zeros(sx,sy);
 for n = 1:numel(masks), roiLabel(masks{n}) = n; end
 if nExisting > 0, roiLabel(opt.ExistingLabels > 0 & roiLabel == 0) = opt.ExistingLabels(opt.ExistingLabels > 0 & roiLabel == 0); end
 info.masks = masks; info.parentIdx = parentIdx; info.parentOverlap = parentFrac;
+% ROIs in overlay (_pre.czi) pixel space: each new ROI keeps the overlay shift/scale/rotation it was drawn with
+info.preLabel = [];
+if ~isempty(ovNorm)
+    [Hp,Wp] = size(ovNorm{1});
+    PL = zeros(Hp,Wp,'uint16');
+    for n = 1:numel(masks)
+        if n <= nExisting || n > numel(prePoly) || isempty(prePoly{n})
+            if ~isempty(opt.ExistingPreLabel) && n <= nExisting
+                pm = imresize(opt.ExistingPreLabel == n,[Hp Wp],'nearest');
+            else
+                pm = imresize(masks{n},[Hp Wp],'nearest');     % no alignment known: registered (unshifted) position
+            end
+        else
+            pm = poly2mask(prePoly{n}(:,1),prePoly{n}(:,2),Hp,Wp);
+        end
+        PL(pm) = n;
+    end
+    info.preLabel = PL;
+end
 if isvalid(fig), delete(fig); end
 
 %% ---------------- local (nested) functions ----------------
@@ -200,7 +225,11 @@ if isvalid(fig), delete(fig); end
                     case '{', moveOverlay(0,0,1/1.05);
                     case ']', moveOverlay(0,0,1.01);      % expand overlay (1%)   } = 5%
                     case '}', moveOverlay(0,0,1.05);
-                    case '0', ovS = 1; ovDx = 0; ovDy = 0; applyOverlayGeom(); setStatus('Overlay position and scale reset.');
+                    case 'z', moveOverlay(0,0,1,0.5);     % rotate overlay counter-clockwise 0.5 deg  (Z = 2 deg)
+                    case 'Z', moveOverlay(0,0,1,2);
+                    case 'x', moveOverlay(0,0,1,-0.5);    % rotate overlay clockwise 0.5 deg  (X = 2 deg)
+                    case 'X', moveOverlay(0,0,1,-2);
+                    case '0', ovS = 1; ovDx = 0; ovDy = 0; ovRot = 0; applyOverlayGeom(); updateOverlay(); setStatus('Overlay position, scale and rotation reset.');
                     case 'u', undoROI();
                     case 'd', addROI();
                     case 'f', finish();
@@ -246,13 +275,15 @@ if isvalid(fig), delete(fig); end
         set(hOv,'XData',c0x + (xdBase-c0x)*ovS + ovDx,'YData',c0y + (ydBase-c0y)*ovS + ovDy);
     end
 
-    function moveOverlay(dx,dy,ds)
+    function moveOverlay(dx,dy,ds,drot)
         if isempty(ovNorm), setStatus('No overlay loaded.'); return; end
         if nargin < 3, ds = 1; end
+        if nargin < 4, drot = 0; end
         ovDx = ovDx + dx; ovDy = ovDy + dy; ovS = ovS*ds;
         applyOverlayGeom();
-        setStatus(sprintf('Overlay shift (%+g, %+g) px, scale %.3f  | 5/6/7/8 shift, [ ] shrink/expand, 0 reset', ...
-            ovDx,ovDy,ovS));
+        if drot ~= 0, ovRot = ovRot + drot; updateOverlay(); end
+        setStatus(sprintf('Overlay shift (%+g, %+g) px, scale %.3f, rotation %+.1f deg | 5-8 shift, [ ] size, z/x rotate, 0 reset', ...
+            ovDx,ovDy,ovS,ovRot));
     end
 
     function updateOverlay()
@@ -273,7 +304,12 @@ if isvalid(fig), delete(fig); end
             end
         end
         rgb = min(rgb,1);
-        set(hOv,'CData',rgb,'AlphaData',oAlpha*max(rgb,[],3));
+        alp = oAlpha*max(rgb,[],3);
+        if ovRot ~= 0     % rotate overlay pixels about their own centre (transparent where rotated-in)
+            rgb = imrotate(rgb,ovRot,'bilinear','crop');
+            alp = imrotate(alp,ovRot,'bilinear','crop');
+        end
+        set(hOv,'CData',rgb,'AlphaData',alp);
         on = find(chOn);
         setStatus(sprintf('Overlay channels on: %s | opacity %.1f',mat2str(on),oAlpha));
     end
@@ -312,6 +348,7 @@ if isvalid(fig), delete(fig); end
         pi_ = 0; pf = 0;
         if hasParent, [pi_,pf] = roiParentAssignment(double(m),opt.ParentMask); end
         masks{n} = m; parentIdx(n,1) = pi_; parentFrac(n,1) = pf;
+        if ~isempty(ovNorm), prePoly{n} = toOverlayCoords(pos); else, prePoly{n} = []; end
         if pi_ > 0, col = pcols(pi_,:); else, col = [1 1 1]; end
         B = bwboundaries(m);
         hLines{n} = plot(ax,B{1}(:,2),B{1}(:,1),'-','Color',col,'LineWidth',1.5);
@@ -335,7 +372,20 @@ if isvalid(fig), delete(fig); end
         delete(hLines{n}); delete(hTexts{n});
         masks(n) = []; hLines(n) = []; hTexts(n) = [];
         parentIdx(n) = []; parentFrac(n) = [];
+        if numel(prePoly) >= n, prePoly(n) = []; end
         setStatus(sprintf('Removed %s %d.',opt.Name,n));
+    end
+
+    function q = toOverlayCoords(pos)
+        % displayed (base-image) x,y  ->  pixel column,row of the ORIGINAL overlay image,
+        % undoing the overlay's current shift / scale (XData,YData) and rotation (imrotate about its centre)
+        [Ho,Wo] = size(ovNorm{1});
+        xd = get(hOv,'XData'); yd = get(hOv,'YData');
+        jj = 1 + (pos(:,1)-xd(1))./(xd(2)-xd(1))*(Wo-1);
+        ii = 1 + (pos(:,2)-yd(1))./(yd(2)-yd(1))*(Ho-1);
+        th = ovRot*pi/180; cx = (Wo+1)/2; cy = (Ho+1)/2;
+        dj = jj-cx; di = ii-cy;
+        q = [cx + dj*cos(th) - di*sin(th), cy + dj*sin(th) + di*cos(th)];
     end
 
     function finish()
