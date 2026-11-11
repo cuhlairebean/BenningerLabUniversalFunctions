@@ -14,7 +14,7 @@ function [roiLabel, info] = drawROIsGUI(baseImg, varargin)
 %     p  /  P        overlay more / less contrast
 %     t  /  T        overlay more / less opaque (translucent)
 %     1 2 3 4 ...    toggle overlay channel 1,2,3,4...      v  overlay on/off
-%     j l i k        shift overlay left/right/up/down (1 px, capital = 5 px)
+%     5 6 7 8        shift overlay left/right/up/down (2 px; shift+key = 10 px)
 %     [  ]           shrink / expand overlay (1%, { } = 5%)   0  reset overlay shift/scale
 %     d              draw next ROI (click-drag freehand, release to finish)
 %     u              undo last ROI                          Enter / f   FINISH
@@ -54,6 +54,7 @@ chNames  = {'red','green','blue','magenta','cyan','yellow'};
 masks = {}; hLines = {}; hTexts = {}; parentIdx = zeros(0,1); parentFrac = zeros(0,1);
 chOn = []; ovNorm = {}; oCenter = 0.5; oWidth = 1; oAlpha = 0.5; ovVisible = true;
 ovDx = 0; ovDy = 0; ovS = 1; xdBase = [1 sy]; ydBase = [1 sx];   % overlay shift (base pixels) and scale
+ovStep = 2;                                                     % base pixels moved per press of keys 5/6/7/8 (shift+key = 5x)
 status = '';
 
 hasParent = ~isempty(opt.ParentMask);
@@ -86,8 +87,8 @@ keyMenu = { ...
     '  t / T       more / less opaque', ...
     '  1 2 3 4     toggle channel', ...
     '  v           overlay on / off', ...
-    '  j l i k     shift overlay L/R/up/down', ...
-    '              (capital = 5 px)', ...
+    '  5 6 7 8     shift overlay L/R/up/down', ...
+    '              (shift+key = 5x step)', ...
     '  [ ]         shrink / expand overlay', ...
     '  { }         same, bigger step', ...
     '  0           reset overlay shift/scale', ...
@@ -187,14 +188,14 @@ if isvalid(fig), delete(fig); end
                     case 't', oAlpha = min(1,oAlpha+0.1); updateOverlay();
                     case 'T', oAlpha = max(0,oAlpha-0.1); updateOverlay();
                     case 'v', ovVisible = ~ovVisible; updateOverlay();
-                    case 'j', moveOverlay(-1,0);          % shift overlay left / right / up / down (1 px; capital = 5 px)
-                    case 'J', moveOverlay(-5,0);
-                    case 'l', moveOverlay(1,0);
-                    case 'L', moveOverlay(5,0);
-                    case 'i', moveOverlay(0,-1);
-                    case 'I', moveOverlay(0,-5);
-                    case 'k', moveOverlay(0,1);
-                    case 'K', moveOverlay(0,5);
+                    case '5', moveOverlay(-ovStep,0);       % shift overlay LEFT   (shift+5 = '%' : 5x bigger step)
+                    case '%', moveOverlay(-5*ovStep,0);
+                    case '6', moveOverlay(ovStep,0);        % shift overlay RIGHT  (shift+6 = '^')
+                    case '^', moveOverlay(5*ovStep,0);
+                    case '7', moveOverlay(0,-ovStep);       % shift overlay UP     (shift+7 = '&')
+                    case '&', moveOverlay(0,-5*ovStep);
+                    case '8', moveOverlay(0,ovStep);        % shift overlay DOWN   (shift+8 = '*')
+                    case '*', moveOverlay(0,5*ovStep);
                     case '[', moveOverlay(0,0,1/1.01);    % shrink overlay (1%)   { = 5%
                     case '{', moveOverlay(0,0,1/1.05);
                     case ']', moveOverlay(0,0,1.01);      % expand overlay (1%)   } = 5%
@@ -250,7 +251,7 @@ if isvalid(fig), delete(fig); end
         if nargin < 3, ds = 1; end
         ovDx = ovDx + dx; ovDy = ovDy + dy; ovS = ovS*ds;
         applyOverlayGeom();
-        setStatus(sprintf('Overlay shift (%+g, %+g) px, scale %.3f  | j/l i/k shift, [ ] shrink/expand, 0 reset', ...
+        setStatus(sprintf('Overlay shift (%+g, %+g) px, scale %.3f  | 5/6/7/8 shift, [ ] shrink/expand, 0 reset', ...
             ovDx,ovDy,ovS));
     end
 
@@ -358,7 +359,7 @@ if isvalid(fig), delete(fig); end
             ' b/B   base bright+/-     n/N     base contrast+/-\n' ...
             ' o/O   overlay bright+/-  p/P     overlay contrast+/-\n' ...
             ' t/T   overlay opacity+/- 1,2,3.. toggle overlay channel   v  overlay on/off\n' ...
-            ' j/l/i/k shift overlay L/R/up/down (capital 5px)   [ ] shrink/expand overlay ({ } bigger)   0 reset overlay\n' ...
+            ' 5/6/7/8 shift overlay L/R/up/down (shift+key 5x)   [ ] shrink/expand overlay ({ } bigger)   0 reset overlay\n' ...
             ' d     draw next ROI      u  undo   Enter/f  FINISH\n'],opt.Name);
     end
 end
