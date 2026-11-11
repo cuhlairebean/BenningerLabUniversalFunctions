@@ -13,7 +13,7 @@ function [fig, cls, means] = plotNormalizedTraces(t, N, xlab, ttl, ratio, thresh
 %   cls        cellstr per cell: 'red' / 'green' / 'unclassified' (all 'all' for the plain figure)
 %   means      struct with .all .red .green (frames x 1, NaN if that group is empty)
 
-ALPHA = 0.1;
+ALPHA = 0.1;   % transparency of the individual cell traces (1 = solid, 0 = invisible); used by both plot types
 nC = size(N,2);
 campari = nargin >= 6 && ~isempty(ratio) && ~isnan(threshold) && numel(ratio) == nC;
 % CaMPARI theme (colors/font/sizes) is used ONLY for CaMPARI figures; the main script passes ratio/threshold
@@ -25,11 +25,23 @@ cls = repmat({'all'},1,nC);
 means.all = mean(N,2,'omitnan'); means.red = nan(size(means.all)); means.green = nan(size(means.all));
 
 if ~campari
+    % ======================= PLAIN (non-CaMPARI) PLOT: EDIT THESE TO CHANGE HOW IT LOOKS =======================
+    % (the colours are [R G B] values from 0 to 1, e.g. [1 0 0] = red, [0 0 1] = blue, [0.5 0.5 0.5] = grey)
+    CELL_COLOR     = [0.5 0.5 0.5];  % colour of the individual cell traces
+    CELL_ALPHA     = ALPHA;          % transparency of individual cells: 1 = solid, 0.1 = very see-through, 0 = invisible
+    CELL_LINEWIDTH = 0.5;            % thickness of the individual cell traces
+    MEAN_COLOR     = [0 0 0];        % colour of the mean trace (black)
+    MEAN_LINEWIDTH = 2.5;            % thickness of the mean trace
+    MEAN_ALPHA     = 1;              % transparency of the mean trace (1 = solid)
+    LEGEND_FONT    = 9;              % legend text size (legend text is always black)
+    % Also: ALPHA (line 16 above) is the default transparency of the individual cells in BOTH plot types.
+    % Axis labels / title text size and font: edit the set(ax,...) lines near the end of this file.
+    % ============================================================================================================
     for c = 1:nC
-        plot(ax,t,N(:,c),'Color',[0.5 0.5 0.5 ALPHA],'LineWidth',0.5);
+        plot(ax,t,N(:,c),'Color',[CELL_COLOR CELL_ALPHA],'LineWidth',CELL_LINEWIDTH);
     end
-    hAll = plot(ax,t,means.all,'k','LineWidth',2.5);
-    legend(ax,hAll,sprintf('Mean, all cells (n=%d)',nC),'Location','southoutside','Orientation','horizontal','Box','off','FontSize',9,'TextColor','k');
+    hAll = plot(ax,t,means.all,'Color',[MEAN_COLOR MEAN_ALPHA],'LineWidth',MEAN_LINEWIDTH);
+    legend(ax,hAll,sprintf('Mean, all cells (n=%d)',nC),'Location','southoutside','Orientation','horizontal','Box','off','FontSize',LEGEND_FONT,'TextColor','k');
 else
     ratio = ratio(:)';
     gCol = sty.colors('green'); mCol = sty.colors('magenta'); yCol = sty.colors('Yellow');
