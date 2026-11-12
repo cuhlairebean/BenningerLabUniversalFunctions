@@ -16,7 +16,7 @@ function appendAnalysisDataset(xlsxPath, rowKey, summary, dataTbl)
 
 defaultHeader = {'Filename','Islet_1','Islet_2','Islet_3','Islet_4','Islet_5','Islet_6','Islet_7','Islet_8', ...
     'BL_idx','HG_idx','FP_idx','SP_idx','DRG_idx','DRG_ID','Glucose Conditions','Sex','Age', ...
-    'BL','HG','FP','SP','DRG'};
+    'BL','HG','FP','SP','DRG','Notes'};
 
 % ---------- sheet 1 ----------
 if exist(xlsxPath,'file')
@@ -66,7 +66,11 @@ if any(strcmpi(sheetnames(xlsxPath),sn))
     old = readcell(xlsxPath,'Sheet',sn);
     writecell(cell(size(old)),xlsxPath,'Sheet',sn);   % blank out leftovers from a previous, larger export
 end
-writetable(dataTbl,xlsxPath,'Sheet',sn);
+if iscell(dataTbl)
+    writecell(dataTbl,xlsxPath,'Sheet',sn);              % header row + data, e.g. {'Time (s)','Cell_cell2',...}
+else
+    writetable(dataTbl,xlsxPath,'Sheet',sn);
+end
 fprintf('  Analysis dataset: row "%s" updated in sheet 1; matrices written to sheet "%s"\n',rowKey,sn);
 end
 

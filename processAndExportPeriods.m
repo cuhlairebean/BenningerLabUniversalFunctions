@@ -7,7 +7,7 @@ function [written, mats] = processAndExportPeriods(CellTC, periods, timeVec, out
 %   CellTC       time x cells matrix (one islet), RAW intensities (NOT already multiplied by -1)
 %   periods      struct array with .name .start .end  (1-based frame indices, as saved by
 %                selectTimeRanges / *_PeriodIndices.mat). 'Baseline' is needed for normalization;
-%                'Low glucose','High glucose','Drug' only LABEL frames and give per-period means.
+%                'Low glucose','High glucose','Drug','First phase','Second phase' only LABEL frames and give per-period means.
 %   timeVec      time stamp of every frame (seconds) - frame index is used if empty
 %   outPrefix    e.g. fullfile(output_dir,[filename '_islet2'])  ->  <outPrefix>_normalized.xlsx
 %   cellLabels   cellstr, one name per column of CellTC (default cell1..cellN)
@@ -44,7 +44,7 @@ function [written, mats] = processAndExportPeriods(CellTC, periods, timeVec, out
 %                  'Means'     mean of each cell over the whole recording and in each selected period
 %                  'Conditions' start/end frames of the selected periods (incl. baseline)
 
-exportNames = {'Low glucose','High glucose','Drug'};
+exportNames = {'Low glucose','High glucose','Drug','First phase','Second phase'};   % First/Second phase lie inside High glucose -> labels like 'High glucose;First phase'
 [nT, nC] = size(CellTC);
 if nargin < 5 || isempty(cellLabels)
     cellLabels = arrayfun(@(j) sprintf('cell%d',j),1:nC,'UniformOutput',false);
